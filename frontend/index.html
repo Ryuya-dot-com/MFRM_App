@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>MFRM Analysis Dashboard</title>
+  <link rel="stylesheet" href="assets/styles.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet" />
+</head>
+<body>
+  <div id="app">
+    <header class="app-header">
+      <div>
+        <h1>Many-Facet Rasch Model (MFRM) Analysis</h1>
+        <p class="subtitle">Run a brms cumulative link mixed model through an API + SPA workflow</p>
+      </div>
+      <div class="api-config">
+        <label for="apiBase">API Endpoint</label>
+        <input id="apiBase" type="text" placeholder="https://your-backend.example.com" />
+        <button id="saveApiBase" class="secondary">Save</button>
+      </div>
+    </header>
+
+    <div class="app-body">
+      <aside class="sidebar" id="sidebar">
+        <section>
+          <h2>Step 1: Data Entry</h2>
+          <p class="hint">Review the template, then paste or upload your data file.</p>
+          <div class="radio-row">
+            <label><input type="radio" name="dataMode" value="paste" checked /> Paste</label>
+            <label><input type="radio" name="dataMode" value="upload" /> File Upload</label>
+          </div>
+          <div id="pasteContainer">
+            <textarea id="pastedData" rows="12">Person	Task	Rater	Criterion	Rating
+P01	Task1	Rater1	Content	4
+P01	Task1	Rater2	Grammar	3
+P01	Task2	Rater3	Vocabulary	5
+P02	Task1	Rater1	Content	2
+P02	Task2	Rater2	Grammar	3
+P02	Task3	Rater3	Delivery	1
+P03	Task1	Rater1	Content	5
+P03	Task2	Rater2	Delivery	4
+P03	Task3	Rater3	Vocabulary	2
+P04	Task1	Rater1	Content	3
+P04	Task2	Rater2	Grammar	4
+P05	Task1	Rater3	Delivery	5
+P05	Task2	Rater3	Vocabulary	
+P06	Task3	Rater2		3</textarea>
+            <div class="single-row">
+              <textarea id="singleRow" rows="2" placeholder="Add one row (e.g. P06\tTask1\tRater2\tContent\t4)"></textarea>
+              <div class="btn-group-vertical">
+                <button id="appendRow" class="secondary">Append Row</button>
+                <button id="clearRows" class="link">Reset Template</button>
+              </div>
+            </div>
+          </div>
+          <div id="uploadContainer" class="hidden">
+            <input type="file" id="fileInput" accept=".csv,.tsv,text/csv,text/tab-separated-values" />
+          </div>
+          <div class="button-row">
+            <button id="downloadTSV" class="secondary">Download Sample TSV</button>
+            <button id="downloadCSV" class="secondary">Download Sample CSV</button>
+          </div>
+        </section>
+
+        <section>
+          <h2>Step 2: Data Settings</h2>
+          <div class="form-control">
+            <label><input type="checkbox" id="hasHeader" checked /> Header row present</label>
+          </div>
+          <div class="form-control">
+            <label for="separator">Delimiter</label>
+            <select id="separator">
+              <option value="\t">Tab</option>
+              <option value=",">Comma</option>
+              <option value=";">Semicolon</option>
+            </select>
+          </div>
+          <button id="loadData" class="primary">Load Data</button>
+        </section>
+
+        <section>
+          <h2>Step 3: Column Mapping</h2>
+          <div class="form-control">
+            <label for="personCol">Person ID</label>
+            <select id="personCol"></select>
+          </div>
+          <div class="form-control">
+            <label for="responseCol">Rating Column</label>
+            <select id="responseCol"></select>
+          </div>
+          <div class="form-control">
+            <p class="label">Facet Columns</p>
+            <p class="hint small">The person column is included automatically. Check only the facets you want to estimate (e.g. raters, tasks).</p>
+            <div id="facetCols" class="checkbox-grid"></div>
+          </div>
+        </section>
+
+        <section>
+          <h2>Step 4: Model Settings</h2>
+          <div class="form-control">
+            <label for="linkFunction">Link Function</label>
+            <select id="linkFunction">
+              <option value="logit">Logit</option>
+              <option value="probit">Probit</option>
+              <option value="cauchit">Cauchit</option>
+              <option value="loglog">Log-log</option>
+            </select>
+          </div>
+          <div class="form-control">
+            <label for="threshold">Threshold Structure</label>
+            <select id="threshold">
+              <option value="flexible">Flexible</option>
+              <option value="symmetric">Symmetric</option>
+              <option value="equidistant">Equidistant</option>
+            </select>
+          </div>
+        </section>
+
+        <section>
+          <h2>Step 5: Analysis</h2>
+          <button id="runAnalysis" class="success">Run MFRM Analysis</button>
+          <p id="statusMessage" class="status"></p>
+        </section>
+      </aside>
+
+      <main class="content">
+        <div class="tab-bar" id="tabBar">
+          <button data-tab="preview" class="active">Data Preview</button>
+          <button data-tab="summary">Model Summary</button>
+          <button data-tab="facets">Facet Estimates</button>
+          <button data-tab="reliability">Reliability & Separation</button>
+          <button data-tab="fit">Fit Diagnostics</button>
+          <button data-tab="dimensionality">Dimensionality</button>
+          <button data-tab="thresholds">Thresholds</button>
+          <button data-tab="residuals">Residuals</button>
+          <button data-tab="downloads">Downloads</button>
+        </div>
+
+        <section id="tab-preview" class="tab-panel active">
+          <h2>Data Preview</h2>
+          <div id="dataPreviewTable" class="table-container"></div>
+          <h3>Column Overview</h3>
+          <div id="dataStructureTable" class="table-container"></div>
+          <h3>Rating Distribution</h3>
+          <div id="responsePlot" class="plot"></div>
+        </section>
+
+        <section id="tab-summary" class="tab-panel">
+          <h2>Model Summary</h2>
+          <div class="grid-two">
+            <div>
+              <h3>Configuration</h3>
+              <div id="modelSummaryTable" class="table-container"></div>
+            </div>
+            <div>
+              <h3>MCMC Diagnostics</h3>
+              <div id="convergenceTable" class="table-container"></div>
+            </div>
+          </div>
+          <h3>Variance Components</h3>
+          <div id="randomEffectsTable" class="table-container"></div>
+        </section>
+
+        <section id="tab-facets" class="tab-panel">
+          <h2>Facet Estimates</h2>
+          <div id="facetTables"></div>
+        </section>
+
+        <section id="tab-reliability" class="tab-panel">
+          <h2>Reliability & Separation Indices</h2>
+          <div id="reliabilityTable" class="table-container"></div>
+          <h3>Interpretation Guide</h3>
+          <div id="interpretationGuide" class="table-container"></div>
+          <h3>Effect Overview</h3>
+          <div id="reliabilityPlot" class="plot"></div>
+        </section>
+
+        <section id="tab-fit" class="tab-panel">
+          <h2>Fit Diagnostics</h2>
+          <div id="fitStatisticsTable" class="table-container"></div>
+          <div class="grid-two">
+            <div>
+              <h3>Mean-square</h3>
+              <div id="msqPlot" class="plot"></div>
+            </div>
+            <div>
+              <h3>ZSTD Scatter</h3>
+              <div id="zstdPlot" class="plot"></div>
+            </div>
+          </div>
+        </section>
+
+        <section id="tab-dimensionality" class="tab-panel">
+          <h2>Dimensionality (Residual PCA)</h2>
+          <div class="facet-selector">
+            <label for="pcaFacetSelect">Facet</label>
+            <select id="pcaFacetSelect"></select>
+          </div>
+          <h3>Eigenvalues</h3>
+          <div id="pcaEigenTable" class="table-container"></div>
+          <h3>Loadings Plot</h3>
+          <div id="pcaLoadingsPlot" class="plot"></div>
+        </section>
+
+        <section id="tab-thresholds" class="tab-panel">
+          <h2>Thresholds & Category Probabilities</h2>
+          <div id="thresholdTable" class="table-container"></div>
+          <h3>Category Probability Curves</h3>
+          <div id="probabilityPlot" class="plot"></div>
+        </section>
+
+        <section id="tab-residuals" class="tab-panel">
+          <h2>Residual Diagnostics</h2>
+          <div class="grid-two">
+            <div>
+              <h3>Residuals vs Fitted</h3>
+              <div id="residualScatter" class="plot"></div>
+            </div>
+            <div>
+              <h3>Standardised Residual Q-Q Plot</h3>
+              <div id="qqPlot" class="plot"></div>
+            </div>
+          </div>
+          <div class="grid-two">
+            <div>
+              <h3>Residual Distribution</h3>
+              <div id="residualDensity" class="plot"></div>
+            </div>
+            <div>
+              <h3>Observed vs Predicted</h3>
+              <div id="observedFitted" class="plot"></div>
+            </div>
+          </div>
+          <h3>Wright Map</h3>
+          <div id="wrightMap" class="plot"></div>
+        </section>
+
+        <section id="tab-downloads" class="tab-panel">
+          <h2>CSV Downloads</h2>
+          <p>Once the analysis completes you can export the following tables.</p>
+          <div class="button-row" id="downloadButtons">
+            <button data-resource="summary" class="secondary" disabled>Summary</button>
+            <button data-resource="reliability" class="secondary" disabled>Reliability</button>
+            <button data-resource="fit" class="secondary" disabled>Fit Statistics</button>
+            <button data-resource="thresholds" class="secondary" disabled>Thresholds</button>
+            <button data-resource="facets" class="secondary" disabled>Facet Parameters</button>
+          </div>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+  <script src="assets/config.js"></script>
+  <script src="assets/app.js"></script>
+</body>
+</html>

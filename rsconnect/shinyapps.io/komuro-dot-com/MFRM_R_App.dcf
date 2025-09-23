@@ -1,0 +1,12 @@
+name: MFRM_R_App
+title: MFRM_R_App
+username: komuro-dot-com
+account: komuro-dot-com
+server: shinyapps.io
+hostUrl: https://api.shinyapps.io/v1
+appId: 15259843
+bundleId: 10940681
+url: https://komuro-dot-com.shinyapps.io/MFRM_R_App/
+version: 1
+asMultiple: FALSE
+asStatic: FALSE
