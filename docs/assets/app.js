@@ -888,42 +888,177 @@
   }
 
   function renderWrightMap() {
-    const map = state.result.wright_map;
-    if (!map) return;
+    const map = state.result.wright_map || {};
     const ability = map.ability_draws || [];
     const points = map.point_data || [];
-    const traces = [];
+    if (!ability.length && (!points || !points.length)) {
+      document.getElementById('wrightMap').innerHTML = '<p class="hint">No Wright map data available.</p>';
+      return;
+    }
+
+    const grouped = groupBy(points, row => row.type || 'Facet');
+    const typeColors = {
+      Criterion: '#e63946',
+      Rater: '#457b9d',
+      Task: '#2a9d8f',
+      Threshold: '#8d5a97'
+    };
+    const sections = [];
+    const pushSection = type => {
+      const data = grouped[type];
+      if (!data || !data.length) return;
+      sections.push({ type, data });
+    };
+
+    pushSection('Criterion');
     if (ability.length) {
-      traces.push({
-        x: ability.map(row => row.Display),
-        type: 'histogram',
-        opacity: 0.4,
-        name: 'Persons',
-        marker: { color: '#90caf9' }
-      });
+      sections.push({ type: 'Person', ability });
     }
-    if (points.length) {
+    pushSection('Rater');
+    pushSection('Task');
+
+    const remainingTypes = Object.keys(grouped).filter(type => !['Criterion', 'Rater', 'Task', 'Threshold'].includes(type));
+    remainingTypes.sort().forEach(pushSection);
+
+    if (grouped.Threshold && grouped.Threshold.length) {
+      sections.push({ type: 'Threshold', data: grouped.Threshold });
+    }
+
+    if (!sections.length && ability.length) {
+      sections.push({ type: 'Person', ability });
+    }
+
+    if (!sections.length) {
+      document.getElementById('wrightMap').innerHTML = '<p class="hint">No Wright map data available.</p>';
+      return;
+    }
+
+    const totalSections = sections.length;
+    const traces = [];
+    const layout = {
+      margin: { t: 40, r: 20, l: 180, b: 60 },
+      legend: { orientation: 'h', yanchor: 'bottom', y: -0.15 },
+      hovermode: 'closest',
+      height: Math.max(420, totalSections * 180)
+    };
+    const gap = 0.02;
+    const legendShown = {};
+
+    sections.forEach((section, idx) => {
+      const axisIndex = idx + 1;
+      const axisSuffix = axisIndex === 1 ? '' : axisIndex;
+      const yAxisKey = `yaxis${axisSuffix}`;
+      const xAxisKey = `xaxis${axisSuffix}`;
+      const yAxisRef = axisIndex === 1 ? 'y' : `y${axisIndex}`;
+      const xAxisRef = axisIndex === 1 ? 'x' : `x${axisIndex}`;
+
+      const domainTop = 1 - (idx / totalSections);
+      const domainBottom = 1 - ((idx + 1) / totalSections);
+      const span = domainTop - domainBottom;
+      const padding = Math.min(gap / totalSections, span / 4);
+      layout[yAxisKey] = {
+        domain: [Math.max(domainBottom + padding, 0), Math.min(domainTop - padding, 1)],
+        automargin: true,
+        showgrid: false,
+        zeroline: false,
+        title: { text: section.type, font: { size: 12 } },
+        anchor: xAxisRef
+      };
+
+      layout[xAxisKey] = layout[xAxisKey] || { domain: [0, 1], zeroline: false };
+      layout[xAxisKey].anchor = yAxisRef;
+      if (axisIndex === totalSections) {
+        layout[xAxisKey].title = 'Latent Scale';
+        layout[xAxisKey].showticklabels = true;
+      } else {
+        layout[xAxisKey].showticklabels = false;
+      }
+      if (axisIndex > 1) {
+        layout[xAxisKey].matches = 'x';
+      }
+
+      if (section.type === 'Person') {
+        layout[yAxisKey].showticklabels = false;
+        traces.push({
+          x: ability.map(row => row.Display),
+          type: 'histogram',
+          histnorm: 'probability density',
+          opacity: 0.45,
+          marker: { color: 'rgba(144, 202, 249, 0.6)' },
+          name: 'Persons',
+          showlegend: !legendShown.Person,
+          hoverinfo: 'skip',
+          nbinsx: Math.min(40, Math.max(10, Math.round(ability.length / 2))),
+          xaxis: xAxisRef,
+          yaxis: yAxisRef
+        });
+        legendShown.Person = true;
+        return;
+      }
+
+      const data = section.data || [];
+      if (!data.length) {
+        return;
+      }
+
+      const labelOrder = data.map(row => row.label).reverse();
+      layout[yAxisKey].type = 'category';
+      layout[yAxisKey].categoryorder = 'array';
+      layout[yAxisKey].categoryarray = labelOrder;
+      layout[yAxisKey].tickmode = 'array';
+      layout[yAxisKey].tickvals = labelOrder;
+      layout[yAxisKey].ticktext = labelOrder;
+
+      const color = typeColors[section.type] || '#1f3a5f';
       traces.push({
-        x: points.map(row => row.Mean),
-        y: points.map(row => row.label),
-        error_x: {
-          type: 'data',
-          symmetric: false,
-          array: points.map(row => row.Upper66 - row.Mean),
-          arrayminus: points.map(row => row.Mean - row.Lower66)
-        },
-        mode: 'markers',
+        x: data.map(row => row.Mean),
+        y: data.map(row => row.label),
         type: 'scatter',
-        name: 'Facets',
-        marker: { color: '#1f3a5f', size: 8 }
+        mode: 'markers',
+        marker: { color, size: 8 },
+        name: section.type,
+        showlegend: !legendShown[section.type],
+        text: data.map(row => `${row.label}<br>Mean: ${formatNumber(row.Mean)}<br>66%: [${formatNumber(row.Lower66)}, ${formatNumber(row.Upper66)}]<br>95%: [${formatNumber(row.Lower95)}, ${formatNumber(row.Upper95)}]`),
+        hoverinfo: 'text',
+        xaxis: xAxisRef,
+        yaxis: yAxisRef
       });
-    }
-    if (!traces.length) return;
-    Plotly.newPlot('wrightMap', traces, {
-      margin: { t: 30, r: 20, l: 160, b: 50 },
-      xaxis: { title: 'Latent Scale' },
-      yaxis: { title: '' }
-    }, { displayModeBar: false });
+      legendShown[section.type] = true;
+
+      const x95 = [];
+      const y95 = [];
+      const x66 = [];
+      const y66 = [];
+      data.forEach(row => {
+        x95.push(row.Lower95, row.Upper95, null);
+        y95.push(row.label, row.label, null);
+        x66.push(row.Lower66, row.Upper66, null);
+        y66.push(row.label, row.label, null);
+      });
+
+      traces.push({
+        x: x95,
+        y: y95,
+        mode: 'lines',
+        line: { color, width: 2, dash: 'dot' },
+        hoverinfo: 'skip',
+        showlegend: false,
+        xaxis: xAxisRef,
+        yaxis: yAxisRef
+      });
+      traces.push({
+        x: x66,
+        y: y66,
+        mode: 'lines',
+        line: { color, width: 4 },
+        hoverinfo: 'skip',
+        showlegend: false,
+        xaxis: xAxisRef,
+        yaxis: yAxisRef
+      });
+    });
+
+    Plotly.newPlot('wrightMap', traces, layout, { displayModeBar: false, responsive: true });
   }
 
   function handleTabClick(event) {

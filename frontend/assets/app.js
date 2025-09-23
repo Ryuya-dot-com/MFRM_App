@@ -1091,10 +1091,12 @@
         automargin: true,
         showgrid: false,
         zeroline: false,
-        title: { text: section.type, font: { size: 12 } }
+        title: { text: section.type, font: { size: 12 } },
+        anchor: xAxisRef
       };
 
       layout[xAxisKey] = layout[xAxisKey] || { domain: [0, 1], zeroline: false };
+      layout[xAxisKey].anchor = yAxisRef;
       if (axisIndex === totalSections) {
         layout[xAxisKey].title = 'Latent Scale';
         layout[xAxisKey].showticklabels = true;
