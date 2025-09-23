@@ -41,7 +41,7 @@ r_files <- setdiff(list.files(r_dir, pattern = "\\.R$", full.names = TRUE),
 purrr::walk(r_files, source)
 source(file.path(root_dir, 'backend/jobs/job_manager.R'))
 
-job_manager <- JobManager$new()
+job_manager <- JobManager$new(repo_root = root_dir)
 
 #* @filter cors
 cors <- function(req, res) {

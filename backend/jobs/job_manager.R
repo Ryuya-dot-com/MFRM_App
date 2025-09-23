@@ -157,15 +157,57 @@ JobManager <- R6::R6Class(
     }
   ),
   public = list(
-    initialize = function(storage_path = file.path("backend", "jobs", "runtime")) {
+    initialize = function(storage_path = file.path("backend", "jobs", "runtime"),
+                          repo_root = NULL) {
       load_backend_packages()
-      private$repo_root <- normalizePath(getwd(), winslash = "/", mustWork = TRUE)
-      private$storage_path <- normalizePath(storage_path, winslash = "/", mustWork = FALSE)
+
+      normalize_abs <- function(path, must_work = TRUE) {
+        normalizePath(path, winslash = "/", mustWork = must_work)
+      }
+
+      locate_repo_root <- function(candidate) {
+        repo_candidate <- tryCatch(normalize_abs(candidate), error = function(e) NULL)
+        if (is.null(repo_candidate)) {
+          return(NULL)
+        }
+
+        modules_candidate <- file.path(repo_candidate, "backend", "R")
+        if (dir.exists(modules_candidate)) {
+          return(list(root = repo_candidate, modules = modules_candidate))
+        }
+
+        parent_root <- dirname(repo_candidate)
+        parent_modules <- file.path(parent_root, "backend", "R")
+        if (dir.exists(parent_modules)) {
+          return(list(root = parent_root, modules = parent_modules))
+        }
+        NULL
+      }
+
+      initial_root <- if (is.null(repo_root)) getwd() else repo_root
+      location <- locate_repo_root(initial_root)
+      if (is.null(location)) {
+        stop(sprintf("Unable to locate backend module directory relative to '%s'.", initial_root))
+      }
+
+      private$repo_root <- location$root
+      private$modules_dir <- location$modules
+
+      is_absolute_path <- function(path) {
+        grepl("^([A-Za-z]:)?[\\/]", path)
+      }
+
+      storage_base <- if (is_absolute_path(storage_path)) {
+        storage_path
+      } else {
+        file.path(private$repo_root, storage_path)
+      }
+
+      private$storage_path <- normalize_abs(storage_base, must_work = FALSE)
       private$registry <- new.env(parent = emptyenv())
       private$futures <- new.env(parent = emptyenv())
       private$ensure_storage()
       future::plan(future::multisession, workers = max(1, parallel::detectCores() - 1))
-      private$modules_dir <- file.path(private$repo_root, "backend", "R")
       private$module_files <- list.files(private$modules_dir, pattern = "\\.R$", full.names = TRUE)
       private$load_modules_env()
     },
