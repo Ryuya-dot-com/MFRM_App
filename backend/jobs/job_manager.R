@@ -9,6 +9,7 @@ JobManager <- R6::R6Class(
     repo_root = NULL,
     modules_dir = NULL,
     module_files = NULL,
+    workers = NULL,
 
     ensure_storage = function() {
       if (!dir.exists(private$storage_path)) {
@@ -29,6 +30,19 @@ JobManager <- R6::R6Class(
         na = "null",
         dataframe = "rows"
       )
+    },
+
+    resolve_workers = function() {
+      env_value <- Sys.getenv("MFRM_FUTURE_WORKERS", "")
+      worker_count <- suppressWarnings(as.integer(env_value))
+      if (!is.na(worker_count) && worker_count > 0) {
+        return(worker_count)
+      }
+      max(1, parallel::detectCores() - 1)
+    },
+
+    log = function(fmt, ...) {
+      message(sprintf("[JobManager] %s", sprintf(fmt, ...)))
     },
 
     load_modules_env = function() {
@@ -68,6 +82,13 @@ JobManager <- R6::R6Class(
         config$facet_cols <- unlist(config$facet_cols, use.names = FALSE)
       }
       prepared <- private$modules_env$prepare_analysis_data(df, config)
+      private$log(
+        "Job %s prepared data (%s rows, %s persons, %s facets).",
+        job_id,
+        prepared$n_obs %||% NA_integer_,
+        prepared$n_persons %||% NA_integer_,
+        length(prepared$facet_names)
+      )
       analysis <- private$modules_env$run_mfrm_analysis(prepared, model_config, sampler_config)
       payload_out <- private$modules_env$assemble_analysis_payload(prepared, analysis, model_config)
 
@@ -78,6 +99,7 @@ JobManager <- R6::R6Class(
       result_path <- file.path(private$job_dir(job_id), "result.json")
       private$write_json_file(result_path, payload_out)
       saveRDS(payload_out, file.path(private$job_dir(job_id), "result.rds"))
+      private$log("Job %s completed successfully.", job_id)
 
       list(
         status = "finished",
@@ -122,11 +144,14 @@ JobManager <- R6::R6Class(
       outcome <- tryCatch(
         future::value(fut),
         error = function(e) {
+          err_msg <- conditionMessage(e)
+          err_call <- deparse(conditionCall(e))
+          private$log("Job %s failed: %s", job_id, err_msg)
           list(
             status = "failed",
             error = list(
-              message = conditionMessage(e),
-              call = deparse(conditionCall(e))
+              message = err_msg,
+              call = err_call
             )
           )
         }
@@ -207,7 +232,9 @@ JobManager <- R6::R6Class(
       private$registry <- new.env(parent = emptyenv())
       private$futures <- new.env(parent = emptyenv())
       private$ensure_storage()
-      future::plan(future::multisession, workers = max(1, parallel::detectCores() - 1))
+      private$workers <- private$resolve_workers()
+      private$log("Configuring background plan with %s worker(s).", private$workers)
+      future::plan(future::multisession, workers = private$workers)
       private$module_files <- list.files(private$modules_dir, pattern = "\\.R$", full.names = TRUE)
       private$load_modules_env()
     },
@@ -223,8 +250,10 @@ JobManager <- R6::R6Class(
         updated_at = Sys.time()
       )
 
+      private$log("Job %s queued.", job_id)
       fut <- tryCatch(
         future::future({
+          private$log("Job %s started.", job_id)
           tryCatch(
             private$run_job(job_id, payload, model_config, sampler_config),
             error = function(e) {
@@ -232,6 +261,7 @@ JobManager <- R6::R6Class(
                 message = conditionMessage(e),
                 call = deparse(conditionCall(e))
               )
+              private$log("Job %s error: %s", job_id, err$message)
               private$write_json_file(
                 file.path(private$job_dir(job_id), "error.json"),
                 list(error = err)

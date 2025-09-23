@@ -122,24 +122,27 @@ P06	Task3	Rater2		3</textarea>
         <section>
           <h2>Step 5: Analysis</h2>
           <button id="runAnalysis" class="success">Run MFRM Analysis</button>
-          <p id="statusMessage" class="status"></p>
+          <p id="statusMessage" class="status" role="status" aria-live="polite"></p>
         </section>
       </aside>
 
       <main class="content">
-        <div class="tab-bar" id="tabBar">
-          <button data-tab="preview" class="active">Data Preview</button>
-          <button data-tab="summary">Model Summary</button>
-          <button data-tab="facets">Facet Estimates</button>
-          <button data-tab="reliability">Reliability & Separation</button>
-          <button data-tab="fit">Fit Diagnostics</button>
-          <button data-tab="dimensionality">Dimensionality</button>
-          <button data-tab="thresholds">Thresholds</button>
-          <button data-tab="residuals">Residuals</button>
-          <button data-tab="downloads">Downloads</button>
+        <div class="tab-bar" id="tabBar" role="tablist">
+          <button id="tabbtn-preview" data-tab="preview" class="active" role="tab" aria-selected="true" aria-controls="tab-preview">Data Preview</button>
+          <button id="tabbtn-summary" data-tab="summary" role="tab" aria-selected="false" aria-controls="tab-summary">Model Summary</button>
+          <button id="tabbtn-facets" data-tab="facets" role="tab" aria-selected="false" aria-controls="tab-facets">Facet Estimates</button>
+          <button id="tabbtn-reliability" data-tab="reliability" role="tab" aria-selected="false" aria-controls="tab-reliability">Reliability & Separation</button>
+          <button id="tabbtn-fit" data-tab="fit" role="tab" aria-selected="false" aria-controls="tab-fit">Fit Diagnostics</button>
+          <button id="tabbtn-dimensionality" data-tab="dimensionality" role="tab" aria-selected="false" aria-controls="tab-dimensionality">Dimensionality</button>
+          <button id="tabbtn-wright" data-tab="wright" role="tab" aria-selected="false" aria-controls="tab-wright">Wright Map</button>
+          <button id="tabbtn-thresholds" data-tab="thresholds" role="tab" aria-selected="false" aria-controls="tab-thresholds">Thresholds</button>
+          <button id="tabbtn-residuals" data-tab="residuals" role="tab" aria-selected="false" aria-controls="tab-residuals">Residuals</button>
+          <button id="tabbtn-descriptives" data-tab="descriptives" role="tab" aria-selected="false" aria-controls="tab-descriptives">Descriptives</button>
+          <button id="tabbtn-help" data-tab="help" role="tab" aria-selected="false" aria-controls="tab-help">Help</button>
+          <button id="tabbtn-downloads" data-tab="downloads" role="tab" aria-selected="false" aria-controls="tab-downloads">Downloads</button>
         </div>
 
-        <section id="tab-preview" class="tab-panel active">
+        <section id="tab-preview" class="tab-panel active" role="tabpanel" aria-labelledby="tabbtn-preview">
           <h2>Data Preview</h2>
           <div id="dataPreviewTable" class="table-container"></div>
           <h3>Column Overview</h3>
@@ -148,8 +151,12 @@ P06	Task3	Rater2		3</textarea>
           <div id="responsePlot" class="plot"></div>
         </section>
 
-        <section id="tab-summary" class="tab-panel">
+        <section id="tab-summary" class="tab-panel" role="tabpanel" aria-labelledby="tabbtn-summary" aria-hidden="true">
           <h2>Model Summary</h2>
+          <div class="callouts">
+            <div id="metadataMessages" class="callout info hidden"></div>
+            <div id="metadataWarnings" class="callout warning hidden"></div>
+          </div>
           <div class="grid-two">
             <div>
               <h3>Configuration</h3>
@@ -162,14 +169,16 @@ P06	Task3	Rater2		3</textarea>
           </div>
           <h3>Variance Components</h3>
           <div id="randomEffectsTable" class="table-container"></div>
+          <h3>Model Fit Indices</h3>
+          <div id="modelFitTable" class="table-container"></div>
         </section>
 
-        <section id="tab-facets" class="tab-panel">
+        <section id="tab-facets" class="tab-panel" role="tabpanel" aria-labelledby="tabbtn-facets" aria-hidden="true">
           <h2>Facet Estimates</h2>
           <div id="facetTables"></div>
         </section>
 
-        <section id="tab-reliability" class="tab-panel">
+        <section id="tab-reliability" class="tab-panel" role="tabpanel" aria-labelledby="tabbtn-reliability" aria-hidden="true">
           <h2>Reliability & Separation Indices</h2>
           <div id="reliabilityTable" class="table-container"></div>
           <h3>Interpretation Guide</h3>
@@ -178,7 +187,7 @@ P06	Task3	Rater2		3</textarea>
           <div id="reliabilityPlot" class="plot"></div>
         </section>
 
-        <section id="tab-fit" class="tab-panel">
+        <section id="tab-fit" class="tab-panel" role="tabpanel" aria-labelledby="tabbtn-fit" aria-hidden="true">
           <h2>Fit Diagnostics</h2>
           <div id="fitStatisticsTable" class="table-container"></div>
           <div class="grid-two">
@@ -193,7 +202,7 @@ P06	Task3	Rater2		3</textarea>
           </div>
         </section>
 
-        <section id="tab-dimensionality" class="tab-panel">
+        <section id="tab-dimensionality" class="tab-panel" role="tabpanel" aria-labelledby="tabbtn-dimensionality" aria-hidden="true">
           <h2>Dimensionality (Residual PCA)</h2>
           <div class="facet-selector">
             <label for="pcaFacetSelect">Facet</label>
@@ -205,14 +214,16 @@ P06	Task3	Rater2		3</textarea>
           <div id="pcaLoadingsPlot" class="plot"></div>
         </section>
 
-        <section id="tab-thresholds" class="tab-panel">
+        <section id="tab-thresholds" class="tab-panel" role="tabpanel" aria-labelledby="tabbtn-thresholds" aria-hidden="true">
           <h2>Thresholds & Category Probabilities</h2>
           <div id="thresholdTable" class="table-container"></div>
+          <h3>Threshold Locations</h3>
+          <div id="thresholdMap" class="plot"></div>
           <h3>Category Probability Curves</h3>
           <div id="probabilityPlot" class="plot"></div>
         </section>
 
-        <section id="tab-residuals" class="tab-panel">
+        <section id="tab-residuals" class="tab-panel" role="tabpanel" aria-labelledby="tabbtn-residuals" aria-hidden="true">
           <h2>Residual Diagnostics</h2>
           <div class="grid-two">
             <div>
@@ -234,11 +245,58 @@ P06	Task3	Rater2		3</textarea>
               <div id="observedFitted" class="plot"></div>
             </div>
           </div>
-          <h3>Wright Map</h3>
-          <div id="wrightMap" class="plot"></div>
         </section>
 
-        <section id="tab-downloads" class="tab-panel">
+        <section id="tab-wright" class="tab-panel" role="tabpanel" aria-labelledby="tabbtn-wright" aria-hidden="true">
+          <h2>Wright Map</h2>
+          <div id="wrightMap" class="plot"></div>
+          <h3>Facet Comparison</h3>
+          <div id="facetComparison" class="plot"></div>
+        </section>
+
+        <section id="tab-descriptives" class="tab-panel" role="tabpanel" aria-labelledby="tabbtn-descriptives" aria-hidden="true">
+          <h2>Descriptive Statistics</h2>
+          <div id="overallStats" class="table-container"></div>
+          <h3>By Facet</h3>
+          <div id="facetStats"></div>
+        </section>
+
+        <section id="tab-help" class="tab-panel" role="tabpanel" aria-labelledby="tabbtn-help" aria-hidden="true">
+          <h2>Help & Guidance</h2>
+          <p>This dashboard runs a Many-Facet Rasch Model (MFRM) via a cumulative link mixed model backend. Follow the steps in the left panel to prepare your data and configure the model.</p>
+          <h3>Quick Start</h3>
+          <ol>
+            <li>Paste data into the template or upload a CSV/TSV file.</li>
+            <li>Check the parsing options (header, delimiter) and load the preview.</li>
+            <li>Map the person, rating, and facet columns.</li>
+            <li>Select the link function and threshold structure, then run the analysis.</li>
+            <li>Review the tabs in order and download CSV summaries as needed.</li>
+          </ol>
+          <h3>Minimum Data Requirements</h3>
+          <ul>
+            <li>Long-format data with one row per rating (Person × Task × Rater × Criterion).</li>
+            <li>An ordered response column with at least two categories (three or more recommended).</li>
+            <li>A person identifier plus at least one additional facet for random-effect estimation.</li>
+            <li>For stable estimates aim for ≥30 observations and ≥3 levels per facet.</li>
+          </ul>
+          <h3>Key Indices</h3>
+          <ul>
+            <li><strong>Reliability</strong>: Proportion of true variance (target &gt; 0.80).</li>
+            <li><strong>Separation</strong>: Spread in standard error units (target &gt; 2.0).</li>
+            <li><strong>Strata</strong>: Distinct measurement strata ((4 × Separation + 1)/3).</li>
+            <li><strong>RMSE</strong>: Measurement precision; lower values indicate better fit.</li>
+            <li><strong>Adjusted SD</strong>: True spread after removing measurement error.</li>
+          </ul>
+          <h3>Model Notes</h3>
+          <ul>
+            <li>Uses cumulative link functions (logit, probit, cauchit, log-log).</li>
+            <li>Includes random effects for persons and selected facets.</li>
+            <li>Supports flexible, symmetric, or equidistant threshold structures.</li>
+          </ul>
+          <p class="hint">See the project README for a full walkthrough and interpretation tips.</p>
+        </section>
+
+        <section id="tab-downloads" class="tab-panel" role="tabpanel" aria-labelledby="tabbtn-downloads" aria-hidden="true">
           <h2>CSV Downloads</h2>
           <p>Once the analysis completes you can export the following tables.</p>
           <div class="button-row" id="downloadButtons">

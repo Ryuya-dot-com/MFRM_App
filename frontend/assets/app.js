@@ -9,6 +9,8 @@
     mapping: { person: '', response: '', facets: [] },
     jobId: null,
     pollTimer: null,
+    pollIntervalMs: 5000,
+    jobStart: null,
     result: null,
     template: null
   };
@@ -79,6 +81,13 @@
     elements.tabPanels = document.querySelectorAll('.tab-panel');
     elements.pcaFacetSelect = document.getElementById('pcaFacetSelect');
     elements.downloadButtons = document.getElementById('downloadButtons');
+    elements.metadataMessages = document.getElementById('metadataMessages');
+    elements.metadataWarnings = document.getElementById('metadataWarnings');
+    elements.modelFitTable = document.getElementById('modelFitTable');
+    elements.thresholdMap = document.getElementById('thresholdMap');
+    elements.facetComparison = document.getElementById('facetComparison');
+    elements.overallStats = document.getElementById('overallStats');
+    elements.facetStats = document.getElementById('facetStats');
   }
 
   function withTimeout(promise, ms, timeoutMessage) {
@@ -550,8 +559,10 @@
         })
         .then(({ job_id }) => {
           state.jobId = job_id;
+          state.jobStart = Date.now();
+          state.pollIntervalMs = 3000;
           setStatus(`Job ${job_id} accepted. Running analysis...`, 'info');
-          pollJob(job_id);
+          schedulePoll(job_id, state.pollIntervalMs);
         })
         .catch(err => {
           elements.runAnalysis.disabled = false;
@@ -562,31 +573,44 @@
     }
   }
 
-  function pollJob(jobId) {
+  function schedulePoll(jobId, delay) {
     if (state.pollTimer) {
-      clearInterval(state.pollTimer);
+      clearTimeout(state.pollTimer);
     }
-    state.pollTimer = setInterval(() => {
-      fetch(`${state.apiBase}/jobs/${jobId}`)
-        .then(res => res.json())
-        .then(info => {
-          if (info.status === 'finished') {
-            clearInterval(state.pollTimer);
-            fetchJobResult(jobId);
-          } else if (info.status === 'failed') {
-            clearInterval(state.pollTimer);
-            elements.runAnalysis.disabled = false;
-            setStatus(`Job failed: ${info?.error?.message || 'Unknown error'}`, 'error');
-          } else {
-            setStatus(`Running... (${info.status})`, 'info');
-          }
-        })
-        .catch(err => {
-          clearInterval(state.pollTimer);
+    state.pollIntervalMs = delay;
+    state.pollTimer = setTimeout(() => pollJob(jobId), delay);
+  }
+
+  function pollJob(jobId) {
+    fetch(`${state.apiBase}/jobs/${jobId}`)
+      .then(res => res.json())
+      .then(info => {
+        if (info.status === 'finished') {
+          if (state.pollTimer) clearTimeout(state.pollTimer);
+          fetchJobResult(jobId);
+          return;
+        }
+        if (info.status === 'failed') {
+          if (state.pollTimer) clearTimeout(state.pollTimer);
+          state.pollTimer = null;
+          state.jobStart = null;
           elements.runAnalysis.disabled = false;
-          setStatus(`Failed to fetch job status: ${err.message}`, 'error');
-        });
-    }, 5000);
+          setStatus(`Job failed: ${info?.error?.message || 'Unknown error'}`, 'error');
+          return;
+        }
+        const elapsed = state.jobStart ? formatDuration(Date.now() - state.jobStart) : '';
+        const statusMsg = elapsed ? `Running... (${info.status}) • Elapsed ${elapsed}` : `Running... (${info.status})`;
+        setStatus(statusMsg, 'info');
+        const nextDelay = Math.min(Math.round((state.pollIntervalMs || 3000) * 1.5), 15000);
+        schedulePoll(jobId, nextDelay);
+      })
+      .catch(err => {
+        if (state.pollTimer) clearTimeout(state.pollTimer);
+        state.pollTimer = null;
+        state.jobStart = null;
+        elements.runAnalysis.disabled = false;
+        setStatus(`Failed to fetch job status: ${err.message}`, 'error');
+      });
   }
 
   function fetchJobResult(jobId) {
@@ -594,6 +618,9 @@
       .then(res => res.json())
       .then(result => {
         state.result = result;
+        state.pollTimer = null;
+        state.pollIntervalMs = 5000;
+        state.jobStart = null;
         elements.runAnalysis.disabled = false;
         setStatus('Analysis finished. Review the tabs for results.', 'success');
         renderAll();
@@ -606,8 +633,17 @@
   }
 
   function enableDownloadButtons() {
+    if (!elements.downloadButtons) return;
+    const availability = {
+      summary: state.result?.model_summary?.length,
+      reliability: state.result?.reliability_table?.length,
+      fit: state.result?.fit_statistics?.length,
+      thresholds: state.result?.thresholds?.length,
+      facets: state.result?.facet_parameters?.length
+    };
     Array.from(elements.downloadButtons.querySelectorAll('button')).forEach(btn => {
-      btn.disabled = !state.result;
+      const key = btn.dataset.resource;
+      btn.disabled = !availability[key];
     });
   }
 
@@ -627,6 +663,7 @@
         link.click();
         document.body.removeChild(link);
         window.URL.revokeObjectURL(url);
+        setStatus(`Download started: ${resource}.`, 'success');
       })
       .catch(() => setStatus('Failed to download CSV.', 'error'));
   }
@@ -636,6 +673,7 @@
     renderTable('dataPreviewTable', state.result.data_preview);
     renderTable('dataStructureTable', state.result.data_structure);
     renderResponsePlotFromResult();
+    renderMetadata();
     renderTable('modelSummaryTable', state.result.model_summary);
     renderTable('convergenceTable', state.result.convergence);
     renderTable('randomEffectsTable', state.result.random_effects_variance);
@@ -647,10 +685,15 @@
     renderFitPlots();
     populatePCASelector();
     renderPCA();
+    renderModelFitIndices();
     renderTable('thresholdTable', state.result.thresholds);
+    renderThresholdMap();
     renderProbabilityCurves();
     renderResidualPlots();
     renderWrightMap();
+    renderFacetComparison();
+    renderDescStats();
+    renderFacetStats();
   }
 
   function renderTable(containerId, data) {
@@ -662,7 +705,16 @@
     }
     const columns = Object.keys(data[0]);
     const header = `<thead><tr>${columns.map(col => `<th>${escapeHtml(col)}</th>`).join('')}</tr></thead>`;
-    const body = `<tbody>${data.map(row => `<tr>${columns.map(col => `<td>${escapeHtml(formatCell(row[col]))}</td>`).join('')}</tr>`).join('')}</tbody>`;
+    const bodyRows = data.map(row => {
+      const cells = columns.map(col => {
+        const formatted = formatCell(row[col]);
+        const safe = escapeHtml(formatted);
+        const html = typeof formatted === 'string' ? safe.replace(/\n/g, '<br>') : safe;
+        return `<td>${html}</td>`;
+      }).join('');
+      return `<tr>${cells}</tr>`;
+    }).join('');
+    const body = `<tbody>${bodyRows}</tbody>`;
     container.innerHTML = `<table>${header}${body}</table>`;
   }
 
@@ -672,11 +724,12 @@
   }
 
   function formatCell(value) {
+    if (value === null || value === undefined) return '';
     if (typeof value === 'number') {
-      if (Number.isInteger(value)) return value;
+      if (Number.isInteger(value)) return value.toString();
       return value.toFixed(3);
     }
-    return value;
+    return String(value);
   }
 
   function renderResponsePlotFromResult() {
@@ -694,6 +747,15 @@
       xaxis: { title: 'Category' },
       yaxis: { title: 'Frequency' }
     }, { displayModeBar: false });
+  }
+
+  function renderMetadata() {
+    const meta = state.result.metadata || {};
+    const warnings = [...(meta.warnings || [])];
+    const waicWarning = state.result?.model_fit_indices?.waic_warning;
+    if (waicWarning) warnings.push(waicWarning.trim());
+    renderCallout(elements.metadataMessages, meta.messages, 'info');
+    renderCallout(elements.metadataWarnings, warnings, 'warning');
   }
 
   function renderFacetTables() {
@@ -726,6 +788,17 @@
       legend: { orientation: 'h' },
       margin: { t: 40, r: 20, l: 40, b: 80 }
     }, { displayModeBar: false });
+  }
+
+  function renderModelFitIndices() {
+    const metrics = state.result.model_fit_indices || {};
+    const rows = Object.entries(metrics)
+      .filter(([key, value]) => key !== 'waic_warning' && value !== null && value !== undefined && value !== '')
+      .map(([key, value]) => ({
+        Metric: formatLabel(key),
+        Value: value
+      }));
+    renderTable('modelFitTable', rows);
   }
 
   function renderFitPlots() {
@@ -796,6 +869,42 @@
     }, { displayModeBar: false });
   }
 
+  function renderThresholdMap() {
+    const container = elements.thresholdMap;
+    if (!container) return;
+    const data = state.result.thresholds || [];
+    if (!data.length) {
+      container.innerHTML = '<p class="hint">No threshold data available.</p>';
+      return;
+    }
+    const labels = data.map(row => `T${row.Threshold}`);
+    const meanTrace = {
+      x: data.map(row => row.Mean),
+      y: labels,
+      mode: 'markers',
+      type: 'scatter',
+      marker: { color: '#c72c41', size: 10 },
+      name: 'Mean',
+      text: data.map(row => `Threshold ${row.Threshold}<br>Mean: ${formatNumber(row.Mean)}<br>66%: [${formatNumber(row.Lower66)}, ${formatNumber(row.Upper66)}]<br>95%: [${formatNumber(row.Lower95)}, ${formatNumber(row.Upper95)}]`),
+      hoverinfo: 'text'
+    };
+    const ci95 = { x: [], y: [], mode: 'lines', line: { color: '#1f3a5f', width: 2 }, name: '95% CrI', hoverinfo: 'skip' };
+    const ci66 = { x: [], y: [], mode: 'lines', line: { color: '#e76f51', width: 4 }, name: '66% CrI', hoverinfo: 'skip' };
+    data.forEach((row, idx) => {
+      const label = labels[idx];
+      ci95.x.push(row.Lower95, row.Upper95, null);
+      ci95.y.push(label, label, null);
+      ci66.x.push(row.Lower66, row.Upper66, null);
+      ci66.y.push(label, label, null);
+    });
+    Plotly.newPlot('thresholdMap', [ci95, ci66, meanTrace], {
+      margin: { t: 40, r: 20, l: 80, b: 40 },
+      xaxis: { title: 'Latent Scale' },
+      yaxis: { title: '', automargin: true },
+      legend: { orientation: 'h' }
+    }, { displayModeBar: false });
+  }
+
   function renderProbabilityCurves() {
     const data = state.result.probability_curves;
     if (!data || !data.length) return;
@@ -812,6 +921,25 @@
       xaxis: { title: 'Ability' },
       yaxis: { title: 'Probability', range: [0, 1] }
     }, { displayModeBar: false });
+  }
+
+  function renderDescStats() {
+    renderTable('overallStats', state.result.desc_stats);
+  }
+
+  function renderFacetStats() {
+    const container = elements.facetStats;
+    const stats = state.result.facet_stats;
+    if (!container) return;
+    if (!stats || !Object.keys(stats).length) {
+      container.innerHTML = '<p class="hint">No facet-level descriptive statistics available.</p>';
+      return;
+    }
+    container.innerHTML = Object.keys(stats).map(facet => {
+      const tableId = `facet-stats-${facet}`;
+      setTimeout(() => renderTable(tableId, stats[facet]), 0);
+      return `<div class="facet-block"><h3>${escapeHtml(facet)}</h3><div id="${tableId}" class="table-container"></div></div>`;
+    }).join('');
   }
 
   function renderResidualPlots() {
@@ -888,41 +1016,118 @@
   }
 
   function renderWrightMap() {
-    const map = state.result.wright_map;
-    if (!map) return;
+    const container = document.getElementById('wrightMap');
+    if (!container) return;
+    const map = state.result.wright_map || {};
     const ability = map.ability_draws || [];
     const points = map.point_data || [];
+    if (!ability.length && (!points || !points.length)) {
+      container.innerHTML = '<p class="hint">No Wright map data available.</p>';
+      return;
+    }
+
     const traces = [];
     if (ability.length) {
       traces.push({
-        x: ability.map(row => row.Display),
-        type: 'histogram',
-        opacity: 0.4,
+        type: 'violin',
         name: 'Persons',
-        marker: { color: '#90caf9' }
+        orientation: 'h',
+        side: 'positive',
+        spanmode: 'hard',
+        points: false,
+        fillcolor: 'rgba(144, 202, 249, 0.35)',
+        line: { color: '#90caf9' },
+        x: ability.map(row => row.Display),
+        y: ability.map(() => 'Persons'),
+        hoverinfo: 'skip'
       });
     }
-    if (points.length) {
-      traces.push({
-        x: points.map(row => row.Mean),
-        y: points.map(row => row.label),
-        error_x: {
-          type: 'data',
-          symmetric: false,
-          array: points.map(row => row.Upper66 - row.Mean),
-          arrayminus: points.map(row => row.Mean - row.Lower66)
-        },
-        mode: 'markers',
-        type: 'scatter',
-        name: 'Facets',
-        marker: { color: '#1f3a5f', size: 8 }
+
+    if (points && points.length) {
+      const grouped = groupBy(points, row => row.type || 'Facet');
+      Object.keys(grouped).forEach(type => {
+        const group = grouped[type];
+        traces.push({
+          x: group.map(row => row.Mean),
+          y: group.map(row => row.label),
+          mode: 'markers',
+          type: 'scatter',
+          name: type,
+          marker: { size: 9 },
+          text: group.map(row => `${row.label}<br>Mean: ${formatNumber(row.Mean)}<br>66%: [${formatNumber(row.Lower66)}, ${formatNumber(row.Upper66)}]<br>95%: [${formatNumber(row.Lower95)}, ${formatNumber(row.Upper95)}]`),
+          hoverinfo: 'text'
+        });
+
+        const ci95 = { x: [], y: [], mode: 'lines', line: { color: 'rgba(31,58,95,0.45)', width: 1.5 }, name: `${type} 95%`, showlegend: false, hoverinfo: 'skip' };
+        const ci66 = { x: [], y: [], mode: 'lines', line: { color: 'rgba(231,111,81,0.9)', width: 4 }, name: `${type} 66%`, showlegend: false, hoverinfo: 'skip' };
+        group.forEach(row => {
+          ci95.x.push(row.Lower95, row.Upper95, null);
+          ci95.y.push(row.label, row.label, null);
+          ci66.x.push(row.Lower66, row.Upper66, null);
+          ci66.y.push(row.label, row.label, null);
+        });
+        traces.push(ci95, ci66);
       });
     }
-    if (!traces.length) return;
+
     Plotly.newPlot('wrightMap', traces, {
       margin: { t: 30, r: 20, l: 160, b: 50 },
       xaxis: { title: 'Latent Scale' },
-      yaxis: { title: '' }
+      yaxis: { title: '', automargin: true },
+      legend: { orientation: 'h' },
+      violinmode: 'overlay'
+    }, { displayModeBar: false });
+  }
+
+  function renderFacetComparison() {
+    const container = elements.facetComparison;
+    const map = state.result.wright_map || {};
+    const draws = map.facet_draws || [];
+    const intervals = map.facet_intervals || [];
+    if (!container) return;
+    if (!draws.length) {
+      container.innerHTML = '<p class="hint">No facet posterior draws available.</p>';
+      return;
+    }
+
+    const grouped = groupBy(draws, row => row.Facet);
+    const violins = Object.entries(grouped).map(([facet, group]) => ({
+        type: 'violin',
+        orientation: 'h',
+        side: 'positive',
+        spanmode: 'hard',
+        points: false,
+        fillcolor: 'rgba(42, 157, 143, 0.2)',
+        line: { color: '#2a9d8f' },
+        name: facet,
+        x: group.map(row => row.Display),
+        y: group.map(() => facet)
+      }));
+
+    const ci95 = { x: [], y: [], mode: 'lines', line: { color: '#264653', width: 1.5 }, name: '95% CrI', hoverinfo: 'skip' };
+    const ci66 = { x: [], y: [], mode: 'lines', line: { color: '#e76f51', width: 4 }, name: '66% CrI', hoverinfo: 'skip' };
+    const means = { x: [], y: [], mode: 'markers', marker: { color: '#1b1b1e', size: 8 }, name: 'Mean' };
+
+    intervals.forEach(row => {
+      ci95.x.push(row.Lower95, row.Upper95, null);
+      ci95.y.push(row.Facet, row.Facet, null);
+      ci66.x.push(row.Lower66, row.Upper66, null);
+      ci66.y.push(row.Facet, row.Facet, null);
+      means.x.push(row.Mean);
+      means.y.push(row.Facet);
+    });
+
+    const traces = [...violins];
+    if (ci95.x.length) traces.push(ci95);
+    if (ci66.x.length) traces.push(ci66);
+    if (means.x.length) traces.push(means);
+
+    Plotly.newPlot('facetComparison', traces, {
+      margin: { t: 40, r: 20, l: 120, b: 40 },
+      xaxis: { title: 'Latent Scale' },
+      yaxis: { title: '', automargin: true },
+      violinmode: 'overlay',
+      legend: { orientation: 'h' }
     }, { displayModeBar: false });
   }
 
@@ -934,16 +1139,71 @@
 
   function activateTab(tabId) {
     elements.tabBar.querySelectorAll('button').forEach(btn => {
-      btn.classList.toggle('active', btn.dataset.tab === tabId);
+      const isActive = btn.dataset.tab === tabId;
+      btn.classList.toggle('active', isActive);
+      btn.setAttribute('aria-selected', String(isActive));
+      btn.setAttribute('tabindex', isActive ? '0' : '-1');
     });
     elements.tabPanels.forEach(panel => {
-      panel.classList.toggle('active', panel.id === `tab-${tabId}`);
+      const isActive = panel.id === `tab-${tabId}`;
+      panel.classList.toggle('active', isActive);
+      panel.setAttribute('aria-hidden', String(!isActive));
+      if (isActive) {
+        panel.setAttribute('tabindex', '0');
+      } else {
+        panel.removeAttribute('tabindex');
+      }
     });
   }
 
   function setStatus(message, level = 'info') {
     elements.statusMessage.textContent = message || '';
     elements.statusMessage.dataset.level = level;
+  }
+
+  function renderCallout(container, items, level) {
+    if (!container) return;
+    const messages = Array.isArray(items) ? items.filter(Boolean) : [];
+    if (!messages.length) {
+      container.classList.add('hidden');
+      container.innerHTML = '';
+      return;
+    }
+    container.classList.remove('hidden');
+    container.dataset.level = level;
+    if (messages.length === 1) {
+      container.innerHTML = escapeHtml(messages[0]);
+      return;
+    }
+    container.innerHTML = `<ul>${messages.map(msg => `<li>${escapeHtml(msg)}</li>`).join('')}</ul>`;
+  }
+
+  function formatDuration(ms) {
+    if (!ms || ms < 0) return '';
+    const totalSeconds = Math.floor(ms / 1000);
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+    if (minutes > 0) {
+      return `${minutes}m ${seconds.toString().padStart(2, '0')}s`;
+    }
+    return `${seconds}s`;
+  }
+
+  function formatLabel(key) {
+    if (!key) return '';
+    const lookup = {
+      looic: 'LOOIC',
+      looic_se: 'LOOIC SE',
+      waic: 'WAIC',
+      waic_se: 'WAIC SE',
+      bayes_r2: 'Bayes R²',
+      waic_warning: 'WAIC Warning'
+    };
+    if (lookup[key]) return lookup[key];
+    return key
+      .split('_')
+      .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(' ');
   }
 
   function groupBy(array, keySelector) {

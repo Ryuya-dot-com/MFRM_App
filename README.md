@@ -11,14 +11,14 @@ The re-design keeps every analytic feature of the legacy Shiny app—data prepar
 
 ## Repository Layout
 
-| Path | Description |
-|------|-------------|
-| `app.R` | Historical Shiny app (kept for reference). |
-| `backend/` | Plumber API, async job manager, analysis modules, and helper scripts. |
-| `backend/R/` | Modularised R code: data prep, analysis pipeline, serializers, download builders, etc. |
-| `backend/jobs/` | Runtime job cache (ignored by git). |
-| `docs/` | Production-ready static site (served by GitHub Pages). |
-| `frontend/` | Editable source for the SPA (mirrors `docs/`, easier to tweak locally). |
+| Path              | Description                                                                            |
+| ----------------- | -------------------------------------------------------------------------------------- |
+| `app.R`         | Historical Shiny app (kept for reference).                                             |
+| `backend/`      | Plumber API, async job manager, analysis modules, and helper scripts.                  |
+| `backend/R/`    | Modularised R code: data prep, analysis pipeline, serializers, download builders, etc. |
+| `backend/jobs/` | Runtime job cache (ignored by git).                                                    |
+| `docs/`         | Production-ready static site (served by GitHub Pages).                                 |
+| `frontend/`     | Editable source for the SPA (mirrors `docs/`, easier to tweak locally).              |
 
 ---
 
@@ -46,22 +46,22 @@ install.packages(c(
 
 Environment variables:
 
-| Variable | Default | Meaning |
-|----------|---------|---------|
+| Variable | Default     | Meaning       |
+| -------- | ----------- | ------------- |
 | `HOST` | `0.0.0.0` | Bind address. |
-| `PORT` | `8000` | Listen port. |
+| `PORT` | `8000`    | Listen port.  |
 
 The API exposes:
 
-| Method & Route | Purpose |
-|----------------|---------|
-| `GET /health` | Liveness probe. |
-| `GET /template` | Template metadata for the client. |
-| `GET /template/sample?format=csv|tsv` | Sample dataset download. |
-| `POST /jobs` | Submit a modelling job (payload: data + column/mode config). |
-| `GET /jobs` | List job IDs seen since startup. |
-| `GET /jobs/{id}` | Poll job status (`queued`, `running`, `finished`, `failed`). |
-| `GET /jobs/{id}/result` | Retrieve full analysis payload (tables, plot data, metadata). |
+| Method & Route                         | Purpose                                                                                  |
+| -------------------------------------- | ---------------------------------------------------------------------------------------- |
+| `GET /health`                        | Liveness probe.                                                                          |
+| `GET /template`                      | Template metadata for the client.                                                        |
+| `GET /template/sample?format=csv       | tsv`                                                                                     |
+| `POST /jobs`                         | Submit a modelling job (payload: data + column/mode config).                             |
+| `GET /jobs`                          | List job IDs seen since startup.                                                         |
+| `GET /jobs/{id}`                     | Poll job status (`queued`, `running`, `finished`, `failed`).                     |
+| `GET /jobs/{id}/result`              | Retrieve full analysis payload (tables, plot data, metadata).                            |
 | `GET /jobs/{id}/download/{resource}` | Stream CSV extracts (`summary`, `reliability`, `fit`, `thresholds`, `facets`). |
 
 Internally, the API:
@@ -103,6 +103,7 @@ The editable source lives in `frontend/`. After changing the markup/scripts, cop
 cd docs
 python3 -m http.server 4000
 ```
+
 Open `http://localhost:4000/` and, in the header, set the API endpoint (e.g. `http://localhost:8000`).
 
 ### Features

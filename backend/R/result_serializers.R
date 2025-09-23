@@ -154,11 +154,11 @@ assemble_fit_scatter_data <- function(fit_summary) {
       Facet = as.character(.data$Facet),
       DisplayLabel = paste(.data$Facet, .data$Level, sep = ": ")
     ) |>
-    dplyr::arrange(.data$Facet, .data$Level)
+    dplyr::arrange(Facet, Level)
 
   msq_data <- base_data |>
     tidyr::pivot_longer(
-      cols = c(.data$InfitMSQ, .data$OutfitMSQ),
+      cols = dplyr::all_of(c("InfitMSQ", "OutfitMSQ")),
       names_to = "Statistic",
       values_to = "Value"
     ) |>
@@ -209,9 +209,15 @@ assemble_residual_diagnostics <- function(df) {
 }
 
 assemble_wright_map_data <- function(ranef_summary, threshold_summary, ranef_draws) {
-  ability_draws <- ranef_draws |>
-    dplyr::filter(.data$Facet == "Person") |>
-    dplyr::mutate(type = "Person")
+  ranef_draws <- if (is.null(ranef_draws)) tibble::tibble() else ranef_draws
+
+  ability_draws <- if (nrow(ranef_draws) > 0) {
+    ranef_draws |>
+      dplyr::filter(.data$Facet == "Person") |>
+      dplyr::mutate(type = "Person")
+  } else {
+    tibble::tibble()
+  }
 
   point_data <- ranef_summary |>
     dplyr::filter(.data$Facet != "Person") |>
@@ -239,9 +245,38 @@ assemble_wright_map_data <- function(ranef_summary, threshold_summary, ranef_dra
     point_data <- dplyr::bind_rows(point_data, threshold_df)
   }
 
+  facet_draws <- if (nrow(ranef_draws) > 0) {
+    ranef_draws |>
+      dplyr::filter(.data$Facet != "Person") |>
+      dplyr::transmute(
+        .draw = .data$.draw,
+        Facet = as.character(.data$Facet),
+        Display = .data$Display
+      )
+  } else {
+    tibble::tibble()
+  }
+
+  facet_intervals <- if (nrow(facet_draws) > 0) {
+    facet_draws |>
+      dplyr::group_by(.data$Facet) |>
+      dplyr::summarise(
+        Mean = mean(.data$Display, na.rm = TRUE),
+        Lower66 = safe_quantile(.data$Display, 0.17),
+        Upper66 = safe_quantile(.data$Display, 0.83),
+        Lower95 = safe_quantile(.data$Display, 0.025),
+        Upper95 = safe_quantile(.data$Display, 0.975),
+        .groups = "drop"
+      )
+  } else {
+    tibble::tibble()
+  }
+
   list(
     ability_draws = ability_draws,
-    point_data = point_data
+    point_data = point_data,
+    facet_draws = facet_draws,
+    facet_intervals = facet_intervals
   )
 }
 
@@ -296,7 +331,9 @@ assemble_probability_curves <- function(threshold_summary, n_categories, link_fu
   )
 
   ability_seq <- seq(-4, 4, length.out = 200)
-  threshold_values <- threshold_summary$Mean
+  threshold_values <- threshold_summary |>
+    dplyr::arrange(suppressWarnings(as.numeric(.data$Threshold))) |>
+    dplyr::pull(.data$Mean)
   n_thresh <- length(threshold_values)
 
   prob_list <- lapply(seq_len(n_categories), function(cat) {

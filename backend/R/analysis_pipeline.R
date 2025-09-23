@@ -49,7 +49,14 @@ run_mfrm_analysis <- function(prepared, model_config = list(), sampler_config = 
     stop(glue::glue("Model fitting failed: {e$message}"))
   })
 
-  draws <- posterior::as_draws_df(fit) |> to_plain_draws()
+  draws_obj <- posterior::as_draws_df(fit)
+  max_draws <- sampler_config$max_draws %||% 4000
+  available_draws <- posterior::ndraws(draws_obj)
+  if (available_draws > max_draws) {
+    thin_stride <- ceiling(available_draws / max_draws)
+    draws_obj <- posterior::thin_draws(draws_obj, thin = thin_stride)
+  }
+  draws <- draws_obj |> to_plain_draws()
   if (is.null(draws) || ncol(draws) == 0) {
     stop("Unable to extract posterior draws from fitted model.")
   }
@@ -57,8 +64,12 @@ run_mfrm_analysis <- function(prepared, model_config = list(), sampler_config = 
   ranef_cols <- grep("^r_", names(draws), value = TRUE)
   ranef_long <- if (length(ranef_cols) > 0) {
     draws |>
-      dplyr::select(.data$.draw, dplyr::all_of(ranef_cols)) |>
-      tidyr::pivot_longer(-.data$.draw, names_to = "parameter", values_to = "value") |>
+      dplyr::select(.draw, dplyr::all_of(ranef_cols)) |>
+      tidyr::pivot_longer(
+        cols = -dplyr::all_of(".draw"),
+        names_to = "parameter",
+        values_to = "value"
+      ) |>
       tidyr::extract(
         parameter,
         into = c("Facet", "Level", "Term"),
@@ -77,14 +88,14 @@ run_mfrm_analysis <- function(prepared, model_config = list(), sampler_config = 
         Display = dplyr::if_else(.data$Facet == "Person", .data$Effect, -.data$Effect),
         Parameter = dplyr::if_else(.data$Facet == "Person", "Ability", "Difficulty")
       ) |>
-      dplyr::select(.data$.draw, .data$Facet, .data$Level, .data$Parameter, .data$Effect, .data$Display)
+      dplyr::select(.draw, Facet, Level, Parameter, Effect, Display)
   } else {
     tibble::tibble(.draw = integer(), Facet = character(), Level = character(),
                    Parameter = character(), Effect = numeric(), Display = numeric())
   }
 
   ranef_summary <- ranef_long |>
-    dplyr::group_by(.data$Facet, .data$Level, .data$Parameter) |>
+    dplyr::group_by(Facet, Level, Parameter) |>
     dplyr::summarise(
       Mean = mean(.data$Display, na.rm = TRUE),
       Median = stats::median(.data$Display, na.rm = TRUE),
@@ -99,8 +110,12 @@ run_mfrm_analysis <- function(prepared, model_config = list(), sampler_config = 
   threshold_cols <- grep("^b_Intercept\\[", names(draws), value = TRUE)
   threshold_draws <- if (length(threshold_cols) > 0) {
     draws |>
-      dplyr::select(.data$.draw, dplyr::all_of(threshold_cols)) |>
-      tidyr::pivot_longer(-.data$.draw, names_to = "Threshold", values_to = "Value") |>
+      dplyr::select(.draw, dplyr::all_of(threshold_cols)) |>
+      tidyr::pivot_longer(
+        cols = -dplyr::all_of(".draw"),
+        names_to = "Threshold",
+        values_to = "Value"
+      ) |>
       tidyr::extract(
         Threshold,
         into = "Threshold",
@@ -116,7 +131,7 @@ run_mfrm_analysis <- function(prepared, model_config = list(), sampler_config = 
   }
 
   threshold_summary <- threshold_draws |>
-    dplyr::group_by(.data$Threshold) |>
+    dplyr::group_by(Threshold) |>
     dplyr::summarise(
       Mean = mean(.data$Value, na.rm = TRUE),
       Median = stats::median(.data$Value, na.rm = TRUE),
@@ -130,12 +145,17 @@ run_mfrm_analysis <- function(prepared, model_config = list(), sampler_config = 
     dplyr::mutate(
       ThresholdOrder = suppressWarnings(as.numeric(.data$Threshold))
     ) |>
-    dplyr::arrange(.data$ThresholdOrder) |>
-    dplyr::select(-.data$ThresholdOrder)
+    dplyr::arrange(ThresholdOrder) |>
+    dplyr::select(-ThresholdOrder)
 
   available_draws <- posterior::ndraws(fit)
-  nsamples <- min(400, available_draws)
-  prob_array <- fitted(fit, summary = FALSE, ndraws = nsamples)
+  nsamples <- min(sampler_config$max_prediction_draws %||% 400, available_draws)
+  prob_array <- tryCatch(
+    fitted(fit, summary = FALSE, ndraws = nsamples),
+    error = function(e) {
+      stop(glue::glue("Failed to obtain fitted category probabilities: {e$message}"))
+    }
+  )
 
   prob_df <- as.data.frame.table(prob_array, responseName = "prob") |>
     dplyr::mutate(
@@ -143,14 +163,14 @@ run_mfrm_analysis <- function(prepared, model_config = list(), sampler_config = 
       .obs = as.integer(.data$Var2),
       Category = as.integer(.data$Var3)
     ) |>
-    dplyr::select(.data$.draw, .data$.obs, .data$Category, .data$prob)
+    dplyr::select(.draw, .obs, Category, prob)
 
   prob_mean <- prob_df |>
-    dplyr::group_by(.data$.obs, .data$Category) |>
+    dplyr::group_by(.obs, Category) |>
     dplyr::summarise(prob = mean(.data$prob, na.rm = TRUE), .groups = "drop")
 
   expected_summary <- prob_mean |>
-    dplyr::group_by(.data$.obs) |>
+    dplyr::group_by(.obs) |>
     dplyr::summarise(
       expected = sum(.data$Category * .data$prob),
       second_moment = sum((.data$Category^2) * .data$prob),
@@ -159,7 +179,7 @@ run_mfrm_analysis <- function(prepared, model_config = list(), sampler_config = 
     dplyr::mutate(
       variance = pmax(second_moment - expected^2, 1e-6)
     ) |>
-    dplyr::select(.data$.obs, expected, variance)
+    dplyr::select(.obs, expected, variance)
 
   observed_numeric <- as.numeric(df$Response)
 
@@ -179,11 +199,11 @@ run_mfrm_analysis <- function(prepared, model_config = list(), sampler_config = 
   fit_base <- df_aug
 
   person_fit <- fit_base |>
-    dplyr::group_by(.data$Person) |>
+    dplyr::group_by(Person) |>
     dplyr::group_modify(~ summarize_fit_block(.x)) |>
     dplyr::ungroup() |>
-    dplyr::mutate(Facet = "Person", Level = .data$Person) |>
-    dplyr::select(.data$Facet, .data$Level, dplyr::everything(), -.data$Person)
+    dplyr::mutate(Facet = "Person", Level = Person) |>
+    dplyr::select(Facet, Level, dplyr::everything(), -Person)
 
   facet_fit <- if (length(active_facets) == 0) {
     person_fit[0, ]
@@ -194,24 +214,24 @@ run_mfrm_analysis <- function(prepared, model_config = list(), sampler_config = 
         dplyr::group_modify(~ summarize_fit_block(.x)) |>
         dplyr::ungroup() |>
         dplyr::mutate(Facet = facet, Level = as.character(.data[[facet]])) |>
-        dplyr::select(.data$Facet, .data$Level, dplyr::everything(), -dplyr::all_of(facet))
-    })
+        dplyr::select(Facet, Level, dplyr::everything(), -dplyr::all_of(facet))
+  })
   }
 
   fit_summary <- dplyr::bind_rows(person_fit, facet_fit)
 
   if (nrow(ranef_long) > 0) {
     ranef_summary_means <- ranef_summary |>
-      dplyr::select(.data$Facet, .data$Level, Mean)
+      dplyr::select(Facet, Level, Mean)
 
     rmse_draws <- ranef_long |>
       dplyr::left_join(ranef_summary_means, by = c("Facet", "Level")) |>
       dplyr::mutate(Error = .data$Display - .data$Mean) |>
-      dplyr::group_by(.data$Facet, .data$.draw) |>
+      dplyr::group_by(Facet, .draw) |>
       dplyr::summarise(RMSE = sqrt(mean(.data$Error^2, na.rm = TRUE)), .groups = "drop")
 
     var_draws <- ranef_long |>
-      dplyr::group_by(.data$Facet, .data$.draw) |>
+      dplyr::group_by(Facet, .draw) |>
       dplyr::summarise(VarLevel = stats::var(.data$Display, na.rm = TRUE), .groups = "drop") |>
       dplyr::mutate(VarLevel = dplyr::if_else(is.na(.data$VarLevel), 0, .data$VarLevel))
 
@@ -229,7 +249,7 @@ run_mfrm_analysis <- function(prepared, model_config = list(), sampler_config = 
       )
 
     reliability_summary <- reliability_draws |>
-      dplyr::group_by(.data$Facet) |>
+      dplyr::group_by(Facet) |>
       dplyr::summarise(
         ObsSD_Mean = mean(.data$ObsSD, na.rm = TRUE),
         ObsSD_Lower66 = safe_quantile(.data$ObsSD, 0.17),
@@ -265,7 +285,7 @@ run_mfrm_analysis <- function(prepared, model_config = list(), sampler_config = 
       ) |>
       dplyr::left_join(
         ranef_summary |>
-          dplyr::count(.data$Facet, name = "N_levels") |>
+          dplyr::count(Facet, name = "N_levels") |>
           dplyr::distinct(),
         by = "Facet"
       )
@@ -281,7 +301,7 @@ run_mfrm_analysis <- function(prepared, model_config = list(), sampler_config = 
       by_facet = purrr::map(active_facets, function(facet) {
         df |>
           dplyr::mutate(Level = as.character(.data[[facet]])) |>
-          dplyr::group_by(.data$Level) |>
+          dplyr::group_by(Level) |>
           dplyr::summarise(
             N = dplyr::n(),
             Mean = mean(as.numeric(.data$Response), na.rm = TRUE),
@@ -290,7 +310,7 @@ run_mfrm_analysis <- function(prepared, model_config = list(), sampler_config = 
             .groups = "drop"
           ) |>
           dplyr::mutate(Facet = facet) |>
-          dplyr::select(.data$Facet, .data$Level, dplyr::everything())
+          dplyr::select(Facet, Level, dplyr::everything())
       }) |> purrr::set_names(active_facets)
     )
   }, error = function(e) {
@@ -306,8 +326,8 @@ run_mfrm_analysis <- function(prepared, model_config = list(), sampler_config = 
           item_combination = paste(!!!rlang::syms(active_facets), sep = "_"),
           Person = as.character(.data$Person)
         ) |>
-        dplyr::select(.data$Person, item_combination, .data$std_residual) |>
-        dplyr::group_by(.data$Person, .data$item_combination) |>
+        dplyr::select(Person, item_combination, std_residual) |>
+        dplyr::group_by(Person, item_combination) |>
         dplyr::summarise(std_residual = mean(.data$std_residual, na.rm = TRUE), .groups = "drop")
 
       residual_matrix_wide <- residual_matrix_prep |>

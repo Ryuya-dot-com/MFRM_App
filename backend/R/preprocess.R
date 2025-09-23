@@ -57,7 +57,18 @@ prepare_analysis_data <- function(df, config) {
   }
 
   person_vec <- as.factor(person_raw)
-  response_vec <- as.ordered(response_raw)
+  response_clean <- if (is.factor(response_raw)) {
+    as.character(response_raw)
+  } else {
+    response_raw
+  }
+
+  numeric_candidate <- suppressWarnings(as.numeric(as.character(response_clean)))
+  if (!anyNA(numeric_candidate)) {
+    response_vec <- ordered(numeric_candidate, levels = sort(unique(numeric_candidate)))
+  } else {
+    response_vec <- ordered(response_clean)
+  }
 
   unique_responses <- unique(response_vec)
   n_unique_responses <- length(unique_responses)
