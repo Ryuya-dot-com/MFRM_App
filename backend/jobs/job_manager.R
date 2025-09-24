@@ -34,11 +34,71 @@ JobManager <- R6::R6Class(
 
     resolve_workers = function() {
       env_value <- Sys.getenv("MFRM_FUTURE_WORKERS", "")
-      worker_count <- suppressWarnings(as.integer(env_value))
-      if (!is.na(worker_count) && worker_count > 0) {
-        return(worker_count)
+      requested <- suppressWarnings(as.integer(env_value))
+
+      read_cgroup_limit <- function() {
+        parse_limit <- function(quota, period) {
+          quota <- suppressWarnings(as.numeric(quota))
+          period <- suppressWarnings(as.numeric(period))
+          if (is.na(quota) || is.na(period) || quota <= 0 || period <= 0) {
+            return(NA_integer_)
+          }
+          floor(quota / period)
+        }
+
+        cpu_max_path <- "/sys/fs/cgroup/cpu.max"
+        if (file.exists(cpu_max_path)) {
+          parts <- strsplit(readLines(cpu_max_path, warn = FALSE), "\\s+")[[1]]
+          if (length(parts) >= 2 && !identical(parts[1], "max")) {
+            limit <- parse_limit(parts[1], parts[2])
+            if (!is.na(limit)) {
+              return(max(1L, limit))
+            }
+          }
+        }
+
+        quota_path <- "/sys/fs/cgroup/cpu/cpu.cfs_quota_us"
+        period_path <- "/sys/fs/cgroup/cpu/cpu.cfs_period_us"
+        if (file.exists(quota_path) && file.exists(period_path)) {
+          limit <- parse_limit(
+            readLines(quota_path, warn = FALSE),
+            readLines(period_path, warn = FALSE)
+          )
+          if (!is.na(limit)) {
+            return(max(1L, limit))
+          }
+        }
+
+        NA_integer_
       }
-      max(1, parallel::detectCores() - 1)
+
+      future_limits <- c(
+        suppressWarnings(future::availableCores(which = "all")),
+        suppressWarnings(future::availableCores(constraints = "cgroups", which = "all"))
+      )
+      future_limits <- suppressWarnings(as.integer(future_limits))
+      future_limits <- future_limits[is.finite(future_limits) & !is.na(future_limits) & future_limits > 0]
+
+      detected_all <- suppressWarnings(parallel::detectCores())
+      detect_limit <- detected_all[is.finite(detected_all) & !is.na(detected_all) & detected_all > 0]
+
+      cgroup_limit <- read_cgroup_limit()
+
+      candidates <- c(future_limits, detect_limit, cgroup_limit)
+      candidates <- candidates[is.finite(candidates) & !is.na(candidates) & candidates > 0]
+      hard_limit <- if (length(candidates) > 0) min(candidates) else 1L
+      hard_limit <- max(1L, as.integer(hard_limit))
+
+      if (!is.na(requested) && requested > 0) {
+        return(max(1L, min(requested, hard_limit)))
+      }
+
+      default_target <- detected_all - 1L
+      if (length(default_target) == 0 || is.na(default_target) || !is.finite(default_target) || default_target < 1L) {
+        default_target <- hard_limit
+      }
+
+      max(1L, min(default_target, hard_limit))
     },
 
     log = function(fmt, ...) {
@@ -234,7 +294,11 @@ JobManager <- R6::R6Class(
       private$ensure_storage()
       private$workers <- private$resolve_workers()
       private$log("Configuring background plan with %s worker(s).", private$workers)
-      future::plan(future::multisession, workers = private$workers)
+      if (private$workers > 1) {
+        future::plan(future::multisession, workers = private$workers)
+      } else {
+        future::plan(future::sequential)
+      }
       private$module_files <- list.files(private$modules_dir, pattern = "\\.R$", full.names = TRUE)
       private$load_modules_env()
     },
