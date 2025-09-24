@@ -26,6 +26,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY backend/install.R /tmp/install.R
 RUN Rscript /tmp/install.R && rm /tmp/install.R
+RUN Rscript -e "options(repos = c(CRAN = Sys.getenv('CRAN_REPO', 'https://packagemanager.posit.co/cran/latest'))); if (!requireNamespace('plumber', quietly = TRUE)) install.packages('plumber', dependencies = TRUE)" 
 
 WORKDIR /app
 COPY . /app
