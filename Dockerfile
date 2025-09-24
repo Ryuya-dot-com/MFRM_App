@@ -14,6 +14,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libcurl4-openssl-dev \
     libssl-dev \
     libxml2-dev \
+    openjdk-17-jdk-headless \
     libfontconfig1-dev \
     libudunits2-dev \
     libglpk-dev \
@@ -30,6 +31,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libproj-dev \
     libgsl-dev \
   && rm -rf /var/lib/apt/lists/*
+
+ENV JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
+ENV PATH="${JAVA_HOME}/bin:${PATH}"
 
 COPY backend/install.R /tmp/install.R
 RUN Rscript /tmp/install.R && rm /tmp/install.R

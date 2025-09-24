@@ -9,5 +9,5 @@ base_packages <- c(
 installed <- rownames(installed.packages())
 needed <- setdiff(base_packages, installed)
 if (length(needed) > 0) {
-  install.packages(needed, dependencies = TRUE)
+  install.packages(needed, dependencies = c('Depends', 'Imports', 'LinkingTo'))
 }
