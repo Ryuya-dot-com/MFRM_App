@@ -10,10 +10,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     gfortran \
     make \
     cmake \
+    pkg-config \
     libcurl4-openssl-dev \
     libssl-dev \
     libxml2-dev \
     libfontconfig1-dev \
+    libudunits2-dev \
     libglpk-dev \
     libharfbuzz-dev \
     libfribidi-dev \
@@ -21,6 +23,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libpng-dev \
     libtiff5-dev \
     libjpeg-dev \
+    libwebp-dev \
+    libsodium-dev \
+    libgdal-dev \
+    libgeos-dev \
+    libproj-dev \
     libgsl-dev \
   && rm -rf /var/lib/apt/lists/*
 
